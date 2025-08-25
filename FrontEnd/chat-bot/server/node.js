@@ -23,10 +23,9 @@ app.post("/api/register", async (req, res) => {
   const { username, password } = req.body;
 
   try {
-    const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query(
       "INSERT INTO user_login (username, password) VALUES ($1, $2) RETURNING id, username",
-      [username, hashedPassword]
+      [username, password]
     );
     res.json({ success: true, user: result.rows[0] });
   } catch (error) {
@@ -64,6 +63,38 @@ app.post("/login", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, error: "Login failed" });
+  }
+});
+
+// Get user's chat history by username
+app.get("/api/chat-history/:username", async (req, res) => {
+  const { username } = req.params;
+
+  try {
+    const result = await pool.query(
+      "SELECT * FROM chat_history WHERE username = $1 ORDER BY timestamp DESC",
+      [username]
+    );
+    res.json({ success: true, history: result.rows });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: "Failed to fetch chat history" });
+  }
+});
+
+// Save chat message
+app.post("/api/save-chat", async (req, res) => {
+  const { username, message, sender, timestamp } = req.body;
+
+  try {
+    const result = await pool.query(
+      "INSERT INTO chat_history (username, message, sender, timestamp) VALUES ($1, $2, $3, $4) RETURNING *",
+      [username, message, sender, timestamp]
+    );
+    res.json({ success: true, chat: result.rows[0] });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: "Failed to save chat" });
   }
 });
 

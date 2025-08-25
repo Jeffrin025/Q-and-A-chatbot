@@ -526,3 +526,26 @@ class EfficientVectorDB:
         except Exception as e:
             print(f"Error listing documents: {e}")
             return []
+        
+    # Add this method to the EfficientVectorDB class
+    def query_with_pdf_filter(self, query_text: str, pdf_name: str, n_results: int = 8) -> List[Dict[str, Any]]:
+        """Query documents from a specific PDF"""
+        if not self.is_initialized():
+            return []
+        
+        try:
+            # Filter by PDF name
+            where_filter = {"pdf_name": {"$eq": pdf_name}}
+            
+            results = self.collection.query(
+                query_texts=[query_text],
+                n_results=n_results,
+                where=where_filter
+            )
+            
+            return self._process_query_results(results, n_results, query_text, None)
+            
+        except Exception as e:
+            print(f"Error querying with PDF filter: {e}")
+            # Fallback to regular query
+            return self.query(query_text, n_results)

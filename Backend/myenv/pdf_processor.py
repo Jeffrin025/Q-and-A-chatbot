@@ -2,6 +2,8 @@ import os
 import re
 import uuid
 import json
+import threading
+import concurrent.futures
 from typing import List, Dict, Any, Optional
 from unstructured.partition.pdf import partition_pdf
 from unstructured.documents.elements import CompositeElement, Table, Image
@@ -17,11 +19,14 @@ import fitz  # PyMuPDF for better image extraction
 import tempfile
 import torch
 from transformers import BlipProcessor, BlipForConditionalGeneration
+from functools import lru_cache
+import time
+from queue import Queue
 
 class PDFProcessor:
-    """Enhanced PDF processor with accurate page number extraction"""
+    """Enhanced PDF processor with accurate page number extraction and performance optimizations"""
     
-    def __init__(self, gemini_api_key: str = None):
+    def __init__(self, gemini_api_key: str = None, max_workers: int = None):
         if gemini_api_key:
             self.gemini_api_key = gemini_api_key
             genai.configure(api_key=gemini_api_key)
@@ -37,6 +42,10 @@ class PDFProcessor:
         # Set device (GPU if available, else CPU)
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.blip_model.to(self.device)
+        
+        # Thread pool for parallel processing
+        self.max_workers = max_workers or (os.cpu_count() or 4)
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers)
         
         # FDA sections
         self.fda_sections = [
@@ -55,12 +64,20 @@ class PDFProcessor:
         # Create directory for extracted images if it doesn't exist
         self.image_output_dir = "./extracted_images"
         os.makedirs(self.image_output_dir, exist_ok=True)
+        
+        # Cache for expensive operations
+        self._visible_page_numbers_cache = {}
+        self._table_signature_cache = set()
 
     def _extract_visible_page_numbers(self, pdf_path: str) -> Dict[int, str]:
         """
         Extract visible page numbers from PDF using OCR/text extraction
         Returns dict mapping physical page index to visible page number
         """
+        # Check cache first
+        if pdf_path in self._visible_page_numbers_cache:
+            return self._visible_page_numbers_cache[pdf_path]
+            
         visible_page_numbers = {}
         
         try:
@@ -92,6 +109,8 @@ class PDFProcessor:
         except Exception as e:
             print(f"Error extracting visible page numbers: {e}")
         
+        # Cache the result
+        self._visible_page_numbers_cache[pdf_path] = visible_page_numbers
         return visible_page_numbers
 
     def _get_accurate_page_number(self, physical_page_idx: int, visible_page_numbers: Dict[int, str]) -> str:
@@ -105,15 +124,65 @@ class PDFProcessor:
         # Fallback: physical page index + 1 (1-based numbering)
         return str(physical_page_idx + 1)
 
+    def _process_element(self, element, visible_page_numbers, extracted_tables):
+        """Process a single element (thread-safe)"""
+        # Get physical page index from metadata
+        physical_page_idx = 0
+        if hasattr(element.metadata, 'page_number'):
+            physical_page_idx = element.metadata.page_number - 1  # Convert to 0-based
+        
+        # Get accurate page number
+        accurate_page_num = self._get_accurate_page_number(physical_page_idx, visible_page_numbers)
+        
+        element_data = {
+            "type": type(element).__name__,
+            "text": str(element),
+            "metadata": element.metadata.to_dict(),
+            "physical_page_index": physical_page_idx,
+            "page_number": accurate_page_num  # Use the accurate visible page number
+        }
+        
+        # Handle tables
+        if isinstance(element, Table):
+            print(f"\n=== UNSTRUCTURED.IO TABLE DETECTED ===")
+            print(f"Page: {element_data['page_number']} (Physical: {physical_page_idx + 1})")
+            
+            element_data["table_data"] = self._structure_table_data(element)
+            element_data["text_representation"] = self._create_table_text_representation(
+                element_data["table_data"], element_data["page_number"]
+            )
+            
+            print(f"Structured table data headers: {element_data['table_data']['headers']}")
+            print(f"Structured table has {element_data['table_data']['row_count']} rows")
+            print("=== END UNSTRUCTURED.IO TABLE ===\n")
+            
+            table_signature = self._get_table_signature(element_data)
+            if table_signature not in extracted_tables:
+                extracted_tables.add(table_signature)
+                return element_data
+            return None
+            
+        # Handle images
+        elif isinstance(element, Image) and hasattr(element.metadata, 'image_path'):
+            element_data["image_path"] = element.metadata.image_path
+            # Defer image captioning to later to avoid blocking
+            return element_data
+        
+        return element_data
+
     def extract_elements(self, pdf_path: str) -> List[Dict[str, Any]]:
-        """Extract elements with accurate page numbering"""
+        """Extract elements with accurate page numbering using parallel processing"""
         print(f"Extracting elements from {pdf_path}...")
+        start_time = time.time()
         
         # First extract visible page numbers
         visible_page_numbers = self._extract_visible_page_numbers(pdf_path)
         
         processed_elements = []
         extracted_tables = set()
+        
+        # Use a thread-safe set for table signatures
+        extracted_tables_lock = threading.Lock()
         
         try:
             # Strategy 1: Use Unstructured.io for text and basic structure
@@ -130,46 +199,22 @@ class PDFProcessor:
                 languages=["eng"],
             )
             
+            # Process elements in parallel
+            futures = []
             for element in elements:
-                # Get physical page index from metadata
-                physical_page_idx = 0
-                if hasattr(element.metadata, 'page_number'):
-                    physical_page_idx = element.metadata.page_number - 1  # Convert to 0-based
-                
-                # Get accurate page number
-                accurate_page_num = self._get_accurate_page_number(physical_page_idx, visible_page_numbers)
-                
-                element_data = {
-                    "type": type(element).__name__,
-                    "text": str(element),
-                    "metadata": element.metadata.to_dict(),
-                    "physical_page_index": physical_page_idx,
-                    "page_number": accurate_page_num  # Use the accurate visible page number
-                }
-                
-                # Handle tables
-                if isinstance(element, Table):
-                    print(f"\n=== UNSTRUCTURED.IO TABLE DETECTED ===")
-                    print(f"Page: {element_data['page_number']} (Physical: {physical_page_idx + 1})")
-                    
-                    element_data["table_data"] = self._structure_table_data(element)
-                    element_data["text_representation"] = self._create_table_text_representation(
-                        element_data["table_data"], element_data["page_number"]
+                futures.append(
+                    self.executor.submit(
+                        self._process_element, 
+                        element, 
+                        visible_page_numbers, 
+                        extracted_tables
                     )
-                    
-                    print(f"Structured table data headers: {element_data['table_data']['headers']}")
-                    print(f"Structured table has {element_data['table_data']['row_count']} rows")
-                    print("=== END UNSTRUCTURED.IO TABLE ===\n")
-                    
-                    table_signature = self._get_table_signature(element_data)
-                    extracted_tables.add(table_signature)
-                    
-                # Handle images
-                elif isinstance(element, Image) and hasattr(element.metadata, 'image_path'):
-                    element_data["image_path"] = element.metadata.image_path
-                    element_data["image_description"] = self._caption_image_with_blip(element_data["image_path"])
-                
-                processed_elements.append(element_data)
+                )
+            
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result:
+                    processed_elements.append(result)
             
         except Exception as e:
             print(f"Unstructured.io extraction failed: {e}")
@@ -177,81 +222,157 @@ class PDFProcessor:
         # Strategy 2: Use pdfplumber for additional text extraction with accurate page numbers
         try:
             with pdfplumber.open(pdf_path) as pdf:
+                futures = []
                 for physical_page_idx, page in enumerate(pdf.pages):
-                    text = page.extract_text()
-                    if text:
-                        accurate_page_num = self._get_accurate_page_number(physical_page_idx, visible_page_numbers)
-                        processed_elements.append({
-                            "type": "TextElement",
-                            "text": text,
-                            "metadata": {"page_number": accurate_page_num},
-                            "physical_page_index": physical_page_idx,
-                            "page_number": accurate_page_num
-                        })
+                    futures.append(
+                        self.executor.submit(
+                            self._extract_page_text,
+                            page,
+                            physical_page_idx,
+                            visible_page_numbers
+                        )
+                    )
+                
+                for future in concurrent.futures.as_completed(futures):
+                    result = future.result()
+                    if result:
+                        processed_elements.append(result)
         except Exception as e:
             print(f"PDFPlumber extraction failed: {e}")
         
         # Strategy 3: Use Camelot for table extraction with accurate page numbers
         try:
             print("\n=== CAMELOT TABLE EXTRACTION ATTEMPT ===")
-            tables = camelot.read_pdf(pdf_path, pages='all', flavor='stream')
+            # Use threading for Camelot table extraction
+            camelot_future = self.executor.submit(camelot.read_pdf, pdf_path, pages='all', flavor='stream')
+            tables = camelot_future.result()
             print(f"Camelot found {len(tables)} potential tables")
             
+            camelot_futures = []
             for i, table in enumerate(tables):
-                if table.parsing_report and table.parsing_report.get('accuracy', 0) > 50:
-                    # Camelot uses 1-based physical page numbers
-                    physical_page_idx = table.page - 1
-                    accurate_page_num = self._get_accurate_page_number(physical_page_idx, visible_page_numbers)
-                    
-                    table_data = {
-                        "headers": table.df.iloc[0].tolist() if not table.df.empty else [],
-                        "data": table.df.iloc[1:].values.tolist() if len(table.df) > 1 else [],
-                        "row_count": len(table.df) - 1 if len(table.df) > 1 else 0,
-                        "col_count": len(table.df.columns) if not table.df.empty else 0
-                    }
-                    
-                    # Create table element
-                    table_element = {
-                        "type": "Table",
-                        "text": table.df.to_string(),
-                        "metadata": {"page_number": accurate_page_num},
-                        "physical_page_index": physical_page_idx,
-                        "page_number": accurate_page_num,
-                        "table_data": table_data,
-                        "text_representation": self._create_table_text_representation(table_data, accurate_page_num),
-                        "extraction_method": "camelot"
-                    }
-                    
-                    # Check for duplicates before adding
-                    table_signature = self._get_table_signature(table_element)
-                    if table_signature not in extracted_tables:
-                        processed_elements.append(table_element)
-                        extracted_tables.add(table_signature)
-                        print(f"=== CAMELOT TABLE ADDED (Page {accurate_page_num}) ===\n")
-                    else:
-                        print("=== CAMELOT TABLE SKIPPED (DUPLICATE) ===\n")
-                else:
-                    accuracy = table.parsing_report.get('accuracy', 0) if table.parsing_report else 0
-                    print(f"Table {i+1} skipped due to low accuracy ({accuracy}%)\n")
+                camelot_futures.append(
+                    self.executor.submit(
+                        self._process_camelot_table,
+                        table,
+                        i,
+                        visible_page_numbers,
+                        extracted_tables
+                    )
+                )
+            
+            for future in concurrent.futures.as_completed(camelot_futures):
+                result = future.result()
+                if result:
+                    processed_elements.append(result)
                     
         except Exception as e:
             print(f"Camelot table extraction failed: {e}")
         
         # Strategy 4: Enhanced image extraction using PyMuPDF with accurate page numbers
         try:
-            image_elements = self._extract_images_with_pymupdf(pdf_path, visible_page_numbers)
+            image_future = self.executor.submit(
+                self._extract_images_with_pymupdf, 
+                pdf_path, 
+                visible_page_numbers
+            )
+            image_elements = image_future.result()
             processed_elements.extend(image_elements)
             print(f"Extracted {len(image_elements)} images using PyMuPDF")
         except Exception as e:
             print(f"PyMuPDF image extraction failed: {e}")
         
+        # Process image captions in parallel (deferred from earlier)
+        image_elements = [e for e in processed_elements if e["type"] == "Image" and "image_path" in e and "image_description" not in e]
+        if image_elements:
+            print(f"Processing {len(image_elements)} image captions in parallel...")
+            caption_futures = []
+            for img_element in image_elements:
+                caption_futures.append(
+                    self.executor.submit(
+                        self._caption_image_and_update_element,
+                        img_element
+                    )
+                )
+            
+            # Wait for all captioning to complete
+            concurrent.futures.wait(caption_futures)
+        
+        end_time = time.time()
+        print(f"Element extraction completed in {end_time - start_time:.2f} seconds")
+        
         return processed_elements
+
+    def _extract_page_text(self, page, physical_page_idx, visible_page_numbers):
+        """Extract text from a single page (thread-safe)"""
+        text = page.extract_text()
+        if text:
+            accurate_page_num = self._get_accurate_page_number(physical_page_idx, visible_page_numbers)
+            return {
+                "type": "TextElement",
+                "text": text,
+                "metadata": {"page_number": accurate_page_num},
+                "physical_page_index": physical_page_idx,
+                "page_number": accurate_page_num
+            }
+        return None
+
+    def _process_camelot_table(self, table, table_index, visible_page_numbers, extracted_tables):
+        """Process a single Camelot table (thread-safe)"""
+        if table.parsing_report and table.parsing_report.get('accuracy', 0) > 50:
+            # Camelot uses 1-based physical page numbers
+            physical_page_idx = table.page - 1
+            accurate_page_num = self._get_accurate_page_number(physical_page_idx, visible_page_numbers)
+            
+            table_data = {
+                "headers": table.df.iloc[0].tolist() if not table.df.empty else [],
+                "data": table.df.iloc[1:].values.tolist() if len(table.df) > 1 else [],
+                "row_count": len(table.df) - 1 if len(table.df) > 1 else 0,
+                "col_count": len(table.df.columns) if not table.df.empty else 0
+            }
+            
+            # Create table element
+            table_element = {
+                "type": "Table",
+                "text": table.df.to_string(),
+                "metadata": {"page_number": accurate_page_num},
+                "physical_page_index": physical_page_idx,
+                "page_number": accurate_page_num,
+                "table_data": table_data,
+                "text_representation": self._create_table_text_representation(table_data, accurate_page_num),
+                "extraction_method": "camelot"
+            }
+            
+            # Check for duplicates before adding
+            table_signature = self._get_table_signature(table_element)
+            if table_signature not in extracted_tables:
+                extracted_tables.add(table_signature)
+                print(f"=== CAMELOT TABLE ADDED (Page {accurate_page_num}) ===\n")
+                return table_element
+            else:
+                print("=== CAMELOT TABLE SKIPPED (DUPLICATE) ===\n")
+        else:
+            accuracy = table.parsing_report.get('accuracy', 0) if table.parsing_report else 0
+            print(f"Table {table_index+1} skipped due to low accuracy ({accuracy}%)\n")
+        
+        return None
+
+    def _caption_image_and_update_element(self, img_element):
+        """Caption an image and update the element (thread-safe)"""
+        img_element["image_description"] = self._caption_image_with_blip(img_element["image_path"])
 
     def _get_table_signature(self, table_element: Dict[str, Any]) -> str:
         """Create a unique signature for a table to detect duplicates"""
         page_num = table_element.get("page_number", 0)
         content_hash = hash(table_element.get("text", "")[:200])  # First 200 chars for signature
-        return f"{page_num}_{content_hash}"
+        signature = f"{page_num}_{content_hash}"
+        
+        # Check cache first
+        if signature in self._table_signature_cache:
+            return signature
+            
+        # Add to cache
+        self._table_signature_cache.add(signature)
+        return signature
 
     def _extract_images_with_pymupdf(self, pdf_path: str, visible_page_numbers: Dict[int, str]) -> List[Dict[str, Any]]:
         """Extract images using PyMuPDF with accurate page numbering"""
@@ -278,9 +399,6 @@ class PDFProcessor:
                     with open(image_path, "wb") as f:
                         f.write(image_bytes)
                     
-                    # Generate caption using BLIP
-                    image_caption = self._caption_image_with_blip(image_path)
-                    
                     image_elements.append({
                         "type": "Image",
                         "text": f"Image on page {accurate_page_num}",
@@ -288,7 +406,7 @@ class PDFProcessor:
                         "physical_page_index": physical_page_idx,
                         "page_number": accurate_page_num,
                         "image_path": image_path,
-                        "image_description": image_caption
+                        # Image captioning will be done in parallel later
                     })
         
         doc.close()
@@ -545,95 +663,140 @@ class PDFProcessor:
         text_elements = [e for e in elements if e["type"] in ["CompositeElement", "TextElement"]]
         sections = self.extract_sections(text_elements)
         
-        # Process text sections
+        # Process text sections in parallel
+        section_futures = []
         for section in sections:
-            if "chunks" not in section:
-                section["chunks"] = self.chunk_content(section["content"])
-            for chunk in section["chunks"]:
-                doc_id = str(uuid.uuid4())
-                metadata = {
-                    "pdf_index": pdf_index,
-                    "pdf_name": pdf_name,
-                    "section": section["section"],
-                    "page_start": section["page_start"],
-                    "page_end": section["page_end"],
-                    "is_fda": section.get("is_fda", False),
-                    "content_type": self._classify_content_type(chunk["content"]),
-                    "has_tables": False,
-                    "has_images": False,
-                    "doc_type": "text",
-                    "citation": f"Page {section['page_start']}-{section['page_end']}, {section['section']}",
-                    "pdf_identifier": f"pdf_{pdf_index}{pdf_name.replace(' ', '')}"
-                }
-                
-                documents_batch.append({
-                    "id": doc_id,
-                    "content": chunk["content"],
-                    "metadata": self._ensure_chromadb_compatible(metadata)
-                })
+            section_futures.append(
+                self.executor.submit(
+                    self._process_section_for_db,
+                    section, pdf_name, pdf_index
+                )
+            )
+        
+        for future in concurrent.futures.as_completed(section_futures):
+            section_docs = future.result()
+            documents_batch.extend(section_docs)
         
         # Process tables - USING ACCURATE PAGE NUMBERS
         table_elements = [e for e in elements if e["type"] == "Table"]
+        table_futures = []
         for table_idx, table in enumerate(table_elements):
-            doc_id = str(uuid.uuid4())
-            
-            metadata = {
-                "pdf_index": pdf_index,
-                "pdf_name": pdf_name,
-                "section": "TABULAR_DATA",
-                "page_number": table["page_number"],  # Accurate visible page number
-                "is_fda": False,
-                "content_type": "tabular",
-                "has_tables": True,
-                "has_images": False,
-                "doc_type": "table",
-                "table_id": str(uuid.uuid4()),
-                "table_index": table_idx + 1,
-                "citation": f"Page {table['page_number']}, Table {table_idx + 1}",  # Accurate citation
-                "table_headers": table.get("table_data", {}).get("headers", []),
-                "table_row_count": table.get("table_data", {}).get("row_count", 0),
-                "table_data_sample": json.dumps(table.get("table_data", {}).get("data", [])[:2]),
-                "pdf_identifier": f"pdf_{pdf_index}{pdf_name.replace(' ', '')}"
-            }
-            
-            table_doc = {
-                "id": doc_id,
-                "content": table.get("text_representation", table["text"]),
-                "metadata": self._ensure_chromadb_compatible(metadata)
-            }
-            documents_batch.append(table_doc)
+            table_futures.append(
+                self.executor.submit(
+                    self._process_table_for_db,
+                    table, table_idx, pdf_name, pdf_index
+                )
+            )
+        
+        for future in concurrent.futures.as_completed(table_futures):
+            table_doc = future.result()
+            if table_doc:
+                documents_batch.append(table_doc)
         
         # Process images - USING ACCURATE PAGE NUMBERS
         image_elements = [e for e in elements if e["type"] == "Image" and "image_description" in e]
+        image_futures = []
         for image_idx, image in enumerate(image_elements):
+            image_futures.append(
+                self.executor.submit(
+                    self._process_image_for_db,
+                    image, image_idx, pdf_name, pdf_index
+                )
+            )
+        
+        for future in concurrent.futures.as_completed(image_futures):
+            image_doc = future.result()
+            if image_doc:
+                documents_batch.append(image_doc)
+        
+        return documents_batch
+
+    def _process_section_for_db(self, section, pdf_name, pdf_index):
+        """Process a section for database storage (thread-safe)"""
+        section_docs = []
+        if "chunks" not in section:
+            section["chunks"] = self.chunk_content(section["content"])
+        for chunk in section["chunks"]:
             doc_id = str(uuid.uuid4())
-            
             metadata = {
                 "pdf_index": pdf_index,
                 "pdf_name": pdf_name,
-                "section": "VISUAL_DATA",
-                "page_number": image["page_number"],  # Accurate visible page number
-                "is_fda": False,
-                "content_type": "visual",
+                "section": section["section"],
+                "page_start": section["page_start"],
+                "page_end": section["page_end"],
+                "is_fda": section.get("is_fda", False),
+                "content_type": self._classify_content_type(chunk["content"]),
                 "has_tables": False,
-                "has_images": True,
-                "doc_type": "image",
-                "image_id": str(uuid.uuid4()),
-                "image_index": image_idx + 1,
-                "citation": f"Page {image['page_number']}, Figure {image_idx + 1}",  # Accurate citation
-                "original_image_path": image.get("image_path", ""),
-                "image_caption": image.get("image_description", ""),
+                "has_images": False,
+                "doc_type": "text",
+                "citation": f"Page {section['page_start']}-{section['page_end']}, {section['section']}",
                 "pdf_identifier": f"pdf_{pdf_index}{pdf_name.replace(' ', '')}"
             }
             
-            image_doc = {
+            section_docs.append({
                 "id": doc_id,
-                "content": image["image_description"],
+                "content": chunk["content"],
                 "metadata": self._ensure_chromadb_compatible(metadata)
-            }
-            documents_batch.append(image_doc)
+            })
         
-        return documents_batch
+        return section_docs
+
+    def _process_table_for_db(self, table, table_idx, pdf_name, pdf_index):
+        """Process a table for database storage (thread-safe)"""
+        doc_id = str(uuid.uuid4())
+        
+        metadata = {
+            "pdf_index": pdf_index,
+            "pdf_name": pdf_name,
+            "section": "TABULAR_DATA",
+            "page_number": table["page_number"],  # Accurate visible page number
+            "is_fda": False,
+            "content_type": "tabular",
+            "has_tables": True,
+            "has_images": False,
+            "doc_type": "table",
+            "table_id": str(uuid.uuid4()),
+            "table_index": table_idx + 1,
+            "citation": f"Page {table['page_number']}, Table {table_idx + 1}",  # Accurate citation
+            "table_headers": table.get("table_data", {}).get("headers", []),
+            "table_row_count": table.get("table_data", {}).get("row_count", 0),
+            "table_data_sample": json.dumps(table.get("table_data", {}).get("data", [])[:2]),
+            "pdf_identifier": f"pdf_{pdf_index}{pdf_name.replace(' ', '')}"
+        }
+        
+        return {
+            "id": doc_id,
+            "content": table.get("text_representation", table["text"]),
+            "metadata": self._ensure_chromadb_compatible(metadata)
+        }
+
+    def _process_image_for_db(self, image, image_idx, pdf_name, pdf_index):
+        """Process an image for database storage (thread-safe)"""
+        doc_id = str(uuid.uuid4())
+        
+        metadata = {
+            "pdf_index": pdf_index,
+            "pdf_name": pdf_name,
+            "section": "VISUAL_DATA",
+            "page_number": image["page_number"],  # Accurate visible page number
+            "is_fda": False,
+            "content_type": "visual",
+            "has_tables": False,
+            "has_images": True,
+            "doc_type": "image",
+            "image_id": str(uuid.uuid4()),
+            "image_index": image_idx + 1,
+            "citation": f"Page {image['page_number']}, Figure {image_idx + 1}",  # Accurate citation
+            "original_image_path": image.get("image_path", ""),
+            "image_caption": image.get("image_description", ""),
+            "pdf_identifier": f"pdf_{pdf_index}{pdf_name.replace(' ', '')}"
+        }
+        
+        return {
+            "id": doc_id,
+            "content": image["image_description"],
+            "metadata": self._ensure_chromadb_compatible(metadata)
+        }
 
     def _classify_content_type(self, content: str) -> str:
         content_lower = content.lower()
@@ -665,10 +828,11 @@ class PDFProcessor:
                 compatible_metadata[key] = str(value)
         return compatible_metadata
 
-    def process_pdf_for_db(self, pdf_path: str, pdf_index: int = 0) -> List[Dict[str, Any]]:
-        """Complete PDF processing pipeline"""
+    def process_pdf_for_db(self, pdf_path: str, pdf_index: int = 0, skip_image_processing: bool = False) -> List[Dict[str, Any]]:
+        """Complete PDF processing pipeline with option to skip image processing"""
         pdf_name = os.path.basename(pdf_path)
         print(f"\n[Processing] Starting processing for {pdf_name}...")
+        start_time = time.time()
         
         # Extract all elements using multiple strategies
         elements = self.extract_elements(pdf_path)
@@ -680,6 +844,11 @@ class PDFProcessor:
         
         print(f"[Processing Summary] Extracted {text_count} text elements, {table_count} tables, {image_count} images")
         
+        # If skipping image processing, filter out image elements
+        if skip_image_processing:
+            elements = [e for e in elements if e["type"] != "Image"]
+            print(f"[Processing Summary] Skipped image processing, removed {image_count} image elements")
+        
         # Prepare documents for database
         documents = self.prepare_documents_for_db(pdf_name, pdf_index, elements)
         print(f"[Processing Summary] Prepared {len(documents)} documents for database storage")
@@ -690,6 +859,9 @@ class PDFProcessor:
         image_docs = sum(1 for doc in documents if doc['metadata']['doc_type'] == 'image')
         
         print(f"[Processing Summary] Document types - Text: {text_docs}, Tables: {table_docs}, Images: {image_docs}")
+        
+        end_time = time.time()
+        print(f"[Processing Summary] Total processing time: {end_time - start_time:.2f} seconds")
         
         return documents
 
@@ -706,11 +878,21 @@ class PDFProcessor:
         all_documents = []
         
         for pdf_index, pdf_path in enumerate(pdf_paths):
+            if not os.path.exists(pdf_path):
+                print(f"Warning: PDF file not found - {pdf_path}")
+                continue
+                
             try:
-                pdf_documents = self.process_pdf_for_db(pdf_path, pdf_index)
-                all_documents.extend(pdf_documents)
-                print(f"Successfully processed {pdf_path} - {len(pdf_documents)} documents")
+                documents = self.process_pdf_for_db(pdf_path, pdf_index)
+                all_documents.extend(documents)
+                print(f"Successfully processed {pdf_path} - {len(documents)} documents")
+                
             except Exception as e:
                 print(f"Error processing {pdf_path}: {str(e)}")
+                continue
         
         return all_documents
+
+    def cleanup(self):
+        """Clean up resources"""
+        self.executor.shutdown(wait=True)

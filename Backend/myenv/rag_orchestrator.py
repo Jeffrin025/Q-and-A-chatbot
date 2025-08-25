@@ -299,9 +299,9 @@ class RAGOrchestrator:
         
         print(f"Processing {pdf_file} ({len(state['processed_pdfs']) + 1}/{len(state['pdf_files']) + len(state['processed_pdfs'])})...")
         
-        # Process PDF using the enhanced processor
+        # Process PDF using the enhanced processor - DON'T skip image processing for ingestion
         try:
-            documents = self.pdf_processor.process_pdf_for_db(pdf_path, pdf_index)
+            documents = self.pdf_processor.process_pdf_for_db(pdf_path, pdf_index, skip_image_processing=False)
             
             if not documents:
                 print(f"Warning: Could not process {pdf_file}")
@@ -321,6 +321,7 @@ class RAGOrchestrator:
         except Exception as e:
             print(f"Error processing {pdf_file}: {e}")
             return {"pdf_files": state["pdf_files"][1:], "current_pdf": None}
+    
     
     def _add_to_database(self, state: RAGState) -> dict:
         """Add PDF to database (only in ingestion mode)"""
@@ -420,3 +421,36 @@ class RAGOrchestrator:
         
         result = self.workflow.invoke(query_state)
         return result["response"]
+    # Add this method to the RAGOrchestrator class
+    def query_pdf(self, user_query: str, pdf_name: str, conversation_context: List[Dict[str, Any]] = None) -> str:
+        """Query a specific PDF with conversation context"""
+        # Check if database has documents
+        if not self.vector_db.is_initialized():
+            if not self.vector_db.initialize(reset=False):
+                return "Database not initialized. Please run ingestion first."
+        
+        if self.vector_db.get_document_count() == 0:
+            return "No documents found in database. Please run ingestion first."
+        
+        # Analyze query with context
+        query_analysis = self.query_processor.analyze_query(
+            user_query, 
+            conversation_context or []
+        )
+        
+        # Retrieve information from the specific PDF
+        retrieved_chunks = self.vector_db.query_with_pdf_filter(
+            user_query, 
+            pdf_name,
+            n_results=10
+        )
+        
+        # Generate response
+        retrieved_info = self.query_processor.format_retrieved_info(retrieved_chunks)
+        response = self.query_processor.generate_response(
+            user_query, 
+            retrieved_info, 
+            conversation_context or []
+        )
+        
+        return response

@@ -71,7 +71,7 @@ class PDFProcessor:
 
     def _extract_visible_page_numbers(self, pdf_path: str) -> Dict[int, str]:
         """
-        Extract visible page numbers from PDF using OCR/text extraction
+        Extract visible page numbers from PDF using enhanced OCR/text extraction
         Returns dict mapping physical page index to visible page number
         """
         # Check cache first
@@ -82,36 +82,116 @@ class PDFProcessor:
         
         try:
             with pdfplumber.open(pdf_path) as pdf:
-                for physical_page_idx, page in enumerate(pdf.pages):
-                    # Extract text from top and bottom margins where page numbers typically appear
-                    top_margin = page.within_bbox((0, 0, page.width, 50))  # Top 50 pixels
-                    bottom_margin = page.within_bbox((0, page.height - 50, page.width, page.height))
+                for physical_page_idx, page in enumerate(pdf.pages):  # Use pdf.pages directly
+                    # Extract text from multiple regions where page numbers typically appear
+                    regions = [
+                        # Top regions
+                        (0, 0, page.width, 80),  # Top 80 pixels
+                        (page.width/2 - 100, 0, page.width/2 + 100, 80),  # Top center
+                        
+                        # Bottom regions
+                        (0, page.height - 80, page.width, page.height),  # Bottom 80 pixels
+                        (page.width/2 - 100, page.height - 80, page.width/2 + 100, page.height),  # Bottom center
+                        
+                        # Side regions (for side page numbers)
+                        (0, 0, 100, page.height),  # Left side
+                        (page.width - 100, 0, page.width, page.height),  # Right side
+                        
+                        # Footer regions (common for page numbers)
+                        (0, page.height - 120, page.width, page.height - 40),
+                        (page.width/2 - 150, page.height - 120, page.width/2 + 150, page.height - 40)
+                    ]
                     
-                    top_text = top_margin.extract_text() or ""
-                    bottom_text = bottom_margin.extract_text() or ""
+                    best_candidate = None
+                    best_confidence = 0
                     
-                    # Look for page numbers in common formats
-                    page_number_pattern = r'\b(\d+|[ivxlcdm]+)\b'
+                    for region_idx, (x0, y0, x1, y1) in enumerate(regions):
+                        try:
+                            region = page.within_bbox((x0, y0, x1, y1))
+                            text = region.extract_text() or ""
+                            
+                            if text.strip():
+                                # Enhanced page number pattern matching
+                                candidates = self._find_page_number_candidates(text)
+                                
+                                for candidate, confidence in candidates:
+                                    if confidence > best_confidence:
+                                        best_candidate = candidate
+                                        best_confidence = confidence
+                                        print(f"Page {physical_page_idx + 1}: Found candidate '{candidate}' with confidence {confidence} in region {region_idx}")
+                        
+                        except Exception as e:
+                            continue
                     
-                    # Check both margins
-                    for text in [top_text, bottom_text]:
-                        matches = re.findall(page_number_pattern, text, re.IGNORECASE)
-                        for match in matches:
-                            # Simple validation: page numbers are usually short
-                            if len(match) <= 10 and match.strip():
-                                visible_page_numbers[physical_page_idx] = match.strip()
-                                break
-                        if physical_page_idx in visible_page_numbers:
-                            break
+                    # If we found a good candidate, use it
+                    if best_candidate and best_confidence >= 0.5:
+                        visible_page_numbers[physical_page_idx] = best_candidate
+                        print(f"Page {physical_page_idx + 1}: Selected page number '{best_candidate}'")
+                    else:
+                        # Fallback: use physical page number
+                        visible_page_numbers[physical_page_idx] = str(physical_page_idx + 1)
+                        print(f"Page {physical_page_idx + 1}: Using fallback page number '{physical_page_idx + 1}'")
             
-            print(f"Extracted visible page numbers: {visible_page_numbers}")
+            print(f"Final extracted visible page numbers: {visible_page_numbers}")
             
         except Exception as e:
             print(f"Error extracting visible page numbers: {e}")
+            # Fallback: create sequential page numbers
+            with pdfplumber.open(pdf_path) as pdf:
+                for physical_page_idx in range(len(pdf.pages)):
+                    visible_page_numbers[physical_page_idx] = str(physical_page_idx + 1)
         
         # Cache the result
         self._visible_page_numbers_cache[pdf_path] = visible_page_numbers
         return visible_page_numbers
+
+    def _find_page_number_candidates(self, text: str) -> List[tuple]:
+        """
+        Find potential page number candidates in text with confidence scores
+        Returns list of (candidate, confidence) tuples
+        """
+        candidates = []
+        lines = text.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Remove common non-page-number text
+            clean_line = re.sub(r'(page|pg|p|no|number|num|#|\||/)', '', line, flags=re.IGNORECASE).strip()
+            
+            # Check if it's a simple number (highest confidence)
+            if clean_line.isdigit():
+                confidence = 0.9
+                if 1 <= int(clean_line) <= 1000:  # Reasonable page number range
+                    confidence = 1.0
+                candidates.append((clean_line, confidence))
+                continue
+            
+            # Check Roman numerals
+            if self._is_roman_numeral(clean_line):
+                candidates.append((clean_line.upper(), 0.8))
+                continue
+            
+            # Check alphanumeric patterns that might be page numbers
+            if len(clean_line) <= 10 and re.match(r'^[A-Za-z0-9\-]+$', clean_line):
+                # Check if it contains digits (medium confidence)
+                if re.search(r'\d', clean_line):
+                    candidates.append((clean_line, 0.6))
+                else:
+                    # Could be section identifiers mistaken for page numbers
+                    candidates.append((clean_line, 0.3))
+        
+        # Sort by confidence (highest first)
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        return candidates
+
+    def _is_roman_numeral(self, s: str) -> bool:
+        """Check if string is a valid Roman numeral"""
+        s = s.upper().strip()
+        roman_pattern = r'^M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$'
+        return bool(re.match(roman_pattern, s))
 
     def _get_accurate_page_number(self, physical_page_idx: int, visible_page_numbers: Dict[int, str]) -> str:
         """

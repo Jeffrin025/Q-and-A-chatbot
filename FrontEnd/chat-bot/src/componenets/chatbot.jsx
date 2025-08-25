@@ -1,6 +1,7 @@
+// chatbot.jsx
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { RefreshCw, Send, Bot, User, Trash2, Mic, Moon, Sun, Copy, Volume2, VolumeX } from "lucide-react";
+import { RefreshCw, Send, Bot, User, Trash2, Mic, Moon, Sun, Copy, Volume2, VolumeX, Upload, X } from "lucide-react";
 
 const ChatBot = ({ username, onSaveChat }) => {
   const [messages, setMessages] = useState([]);
@@ -288,7 +289,7 @@ const ChatBot = ({ username, onSaveChat }) => {
 
   const copyMessage = (text) => {
     navigator.clipboard.writeText(text);
-    alert("Message copied!");
+    // You could use a toast notification here instead of alert
   };
 
   const downloadChat = () => {
@@ -301,80 +302,126 @@ const ChatBot = ({ username, onSaveChat }) => {
   };
 
   return (
-    <div className={`flex flex-col h-full ${darkMode ? "bg-gray-900 text-white" : "bg-gradient-to-br from-gray-50 to-gray-100"}`}>
+    <div className={`flex flex-col h-full ${darkMode ? "bg-gray-900 text-white" : "bg-white"}`}>
       {/* Header */}
-      <div className="bg-blue-600 text-white p-4 shadow-lg flex justify-between items-center">
+      <div className="bg-white border-b border-gray-200 p-4 shadow-sm flex justify-between items-center">
         <div>
-          <h1 className="text-xl font-bold">💊 Medical RAG ChatBot</h1>
-          {databaseInfo && <p className="text-sm">{databaseInfo.document_count} docs loaded</p>}
+          <h1 className="text-xl font-bold text-gray-800">💊 Medical RAG ChatBot</h1>
+          {databaseInfo && <p className="text-sm text-gray-500">{databaseInfo.document_count} documents loaded</p>}
         </div>
         <div className="flex space-x-2">
-          <button onClick={clearConversation} className="bg-red-500 px-3 py-1 rounded hover:bg-red-600 flex items-center space-x-1"><Trash2 size={14}/> Clear</button>
-          <button onClick={fetchDatabaseInfo} className="bg-white text-blue-600 px-3 py-1 rounded hover:bg-gray-100 flex items-center space-x-1"><RefreshCw size={14}/> Refresh</button>
-          <button onClick={downloadChat} className="bg-green-500 px-3 py-1 rounded hover:bg-green-600 flex items-center space-x-1">Save</button>
-          <button onClick={() => setDarkMode(!darkMode)} className="bg-gray-700 px-3 py-1 rounded">{darkMode ? <Sun size={16}/> : <Moon size={16}/>}</button>
+          <button onClick={clearConversation} className="flex items-center space-x-1 bg-red-50 text-red-600 px-3 py-2 rounded-lg hover:bg-red-100 transition">
+            <Trash2 size={16}/>
+            <span>Clear</span>
+          </button>
+          <button onClick={fetchDatabaseInfo} className="flex items-center space-x-1 bg-blue-50 text-blue-600 px-3 py-2 rounded-lg hover:bg-blue-100 transition">
+            <RefreshCw size={16}/>
+            <span>Refresh</span>
+          </button>
+          <button onClick={downloadChat} className="flex items-center space-x-1 bg-green-50 text-green-600 px-3 py-2 rounded-lg hover:bg-green-100 transition">
+            <span>Save Chat</span>
+          </button>
+          <button onClick={() => setDarkMode(!darkMode)} className="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-200 transition">
+            {darkMode ? <Sun size={16}/> : <Moon size={16}/>}
+          </button>
         </div>
       </div>
 
       {/* PDF Select + Upload */}
-      <div className="flex items-center space-x-2 p-2 border-b bg-white">
-        <select 
-          value={selectedPdf} 
-          onChange={(e) => setSelectedPdf(e.target.value)}
-          className="px-2 py-1 border rounded"
-        >
-          <option value="">All PDFs</option>
-          {availablePdfs.map(pdf => (
-            <option key={pdf} value={pdf}>{pdf}</option>
-          ))}
-        </select>
+      <div className="flex items-center space-x-3 p-4 border-b border-gray-200 bg-gray-50">
+        <div className="flex-1">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Select PDF</label>
+          <select 
+            value={selectedPdf} 
+            onChange={(e) => setSelectedPdf(e.target.value)}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+          >
+            <option value="">All PDFs</option>
+            {availablePdfs.map(pdf => (
+              <option key={pdf} value={pdf}>{pdf}</option>
+            ))}
+          </select>
+        </div>
         
         <button 
           onClick={() => setShowUploadModal(true)}
-          className="bg-purple-500 text-white px-3 py-1 rounded hover:bg-purple-600"
+          className="flex items-center space-x-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 mt-6 transition"
         >
-          Upload PDF
+          <Upload size={16}/>
+          <span>Upload PDF</span>
         </button>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full text-gray-400">
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 text-center max-w-md">
+              <Bot size={48} className="mx-auto text-blue-500 mb-4" />
+              <h3 className="text-lg font-medium text-gray-700 mb-2">Welcome to Medical RAG ChatBot</h3>
+              <p className="text-gray-500">Ask questions about drug information, or select a specific PDF to query.</p>
+            </div>
+          </div>
+        )}
+        
         {messages.map((message) => (
-          <motion.div key={message.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-            <div className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}>
-              <div className={`p-3 rounded-2xl shadow max-w-xl relative ${message.sender === "user" ? "bg-blue-600 text-white" : "bg-white text-gray-900"}`}>
-                <p>{message.text}</p>
-                <p className="text-xs opacity-60 mt-1">{message.timestamp}</p>
-                {message.sender === "bot" && (
-                  <div className="absolute top-1 right-1 flex space-x-1">
-                    <button onClick={() => copyMessage(message.text)} className="text-gray-400 hover:text-gray-600">
-                      <Copy size={14}/>
+          <motion.div 
+            key={message.id} 
+            initial={{ opacity: 0, y: 10 }} 
+            animate={{ opacity: 1, y: 0 }}
+            className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
+          >
+            <div className={`p-4 rounded-2xl max-w-xl relative ${message.sender === "user" 
+              ? "bg-blue-600 text-white" 
+              : message.sender === "error" 
+                ? "bg-red-100 text-red-800 border border-red-200"
+                : "bg-white text-gray-800 shadow-sm border border-gray-200"}`}
+            >
+              <p className="whitespace-pre-wrap">{message.text}</p>
+              <p className="text-xs opacity-70 mt-2">{message.timestamp}</p>
+              
+              {message.sender === "bot" && (
+                <div className="absolute -bottom-4 right-2 flex space-x-1 bg-white rounded-lg shadow-sm p-1 border border-gray-200">
+                  <button 
+                    onClick={() => copyMessage(message.text)} 
+                    className="p-1 text-gray-500 hover:text-gray-700 rounded hover:bg-gray-100 transition"
+                    title="Copy message"
+                  >
+                    <Copy size={14}/>
+                  </button>
+                  {speakingMessageId === message.id ? (
+                    <button 
+                      onClick={stopSpeaking} 
+                      className="p-1 text-red-500 hover:text-red-700 rounded hover:bg-gray-100 transition"
+                      title="Stop speaking"
+                    >
+                      <VolumeX size={14}/>
                     </button>
-                    {speakingMessageId === message.id ? (
-                      <button onClick={stopSpeaking} className="text-red-500 hover:text-red-700">
-                        <VolumeX size={14}/>
-                      </button>
-                    ) : (
-                      <button onClick={() => speakText(message.text, message.id)} className="text-gray-400 hover:text-gray-600">
-                        <Volume2 size={14}/>
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+                  ) : (
+                    <button 
+                      onClick={() => speakText(message.text, message.id)} 
+                      className="p-1 text-gray-500 hover:text-gray-700 rounded hover:bg-gray-100 transition"
+                      title="Read aloud"
+                    >
+                      <Volume2 size={14}/>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </motion.div>
         ))}
+        
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-white p-3 rounded-2xl shadow max-w-xs">
-              <div className="flex space-x-1 items-center">
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200 max-w-xs">
+              <div className="flex space-x-2 items-center">
                 <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                 </div>
-                <span className="text-sm text-gray-500 ml-2">Bot is thinking...</span>
+                <span className="text-sm text-gray-500">Processing your question...</span>
               </div>
             </div>
           </div>
@@ -383,50 +430,105 @@ const ChatBot = ({ username, onSaveChat }) => {
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSendMessage} className="p-4 border-t bg-white flex space-x-2">
-        <button type="button" onClick={startListening} className={`w-12 h-12 rounded-full flex items-center justify-center ${isListening ? "bg-red-500" : "bg-gray-300"}`}>
-          <Mic size={20} className={isListening ? "text-white" : "text-gray-700"} />
-        </button>
-        <input value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder="Ask about drug information..." className="flex-1 px-4 py-2 border rounded-full"/>
-        <button type="submit" className="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center"><Send size={20}/></button>
+      <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 bg-white">
+        <div className="flex space-x-3">
+          <button 
+            type="button" 
+            onClick={startListening} 
+            className={`w-12 h-12 rounded-full flex items-center justify-center transition ${isListening 
+              ? "bg-red-500 text-white animate-pulse" 
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
+            title={isListening ? "Listening..." : "Voice input"}
+          >
+            <Mic size={20} />
+          </button>
+          
+          <input 
+            value={inputMessage} 
+            onChange={(e) => setInputMessage(e.target.value)} 
+            placeholder="Ask about drug information..." 
+            className="flex-1 px-5 py-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+          />
+          
+          <button 
+            type="submit" 
+            disabled={isLoading || !inputMessage.trim()}
+            className="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+          >
+            <Send size={20}/>
+          </button>
+        </div>
       </form>
 
       {/* Upload Modal */}
       {showUploadModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-4 rounded-lg w-96">
-            <h2 className="text-lg font-bold mb-4">Upload PDF</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-md p-6 shadow-xl">
+            <div className="flex justify-between items-center mb-5">
+              <h2 className="text-xl font-semibold text-gray-800">Upload PDF Document</h2>
+              <button 
+                onClick={() => setShowUploadModal(false)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition"
+              >
+                <X size={20} />
+              </button>
+            </div>
             
-            <input 
-              type="file" 
-              accept=".pdf"
-              onChange={handleFileUpload}
-              className="mb-4"
-            />
+            <div className="mb-5">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Select PDF file</label>
+              <div className="flex items-center justify-center w-full">
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-blue-500 transition">
+                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                    <Upload className="w-8 h-8 mb-3 text-gray-400" />
+                    <p className="mb-2 text-sm text-gray-500">Click to upload or drag and drop</p>
+                    <p className="text-xs text-gray-500">PDF (max. 10MB)</p>
+                  </div>
+                  <input 
+                    type="file" 
+                    accept=".pdf"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            </div>
             
             {uploadStatus.id && (
-              <div className="mb-2">
-                <p>Processing: {uploadStatus.filename}</p>
-                <p>Status: {uploadStatus.status}</p>
+              <div className="mb-5 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm font-medium text-blue-700">Processing: {uploadStatus.filename}</span>
+                  <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                    uploadStatus.status === 'completed' ? 'bg-green-100 text-green-800' :
+                    uploadStatus.status === 'failed' ? 'bg-red-100 text-red-800' :
+                    'bg-blue-100 text-blue-800'
+                  }`}>
+                    {uploadStatus.status.charAt(0).toUpperCase() + uploadStatus.status.slice(1)}
+                  </span>
+                </div>
+                
                 {uploadStatus.progress > 0 && (
-                  <div className="w-full bg-gray-200 rounded-full">
+                  <div className="w-full bg-gray-200 rounded-full h-2">
                     <div 
-                      className="bg-blue-500 text-xs font-medium text-blue-100 text-center p-0.5 leading-none rounded-full" 
+                      className="bg-blue-500 h-2 rounded-full transition-all duration-300" 
                       style={{ width: `${uploadStatus.progress}%` }}
-                    >
-                      {uploadStatus.progress}%
-                    </div>
+                    ></div>
                   </div>
+                )}
+                
+                {uploadStatus.status === 'processing' && uploadStatus.progress > 0 && (
+                  <p className="text-xs text-blue-600 mt-2">{uploadStatus.progress}% complete</p>
                 )}
               </div>
             )}
             
-            <button 
-              onClick={() => setShowUploadModal(false)}
-              className="bg-gray-500 text-white px-3 py-1 rounded hover:bg-gray-600"
-            >
-              Close
-            </button>
+            <div className="flex justify-end">
+              <button 
+                onClick={() => setShowUploadModal(false)}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -404,7 +404,7 @@ def classify_and_handle_query(query: str, conversation_id: str = None):
     try:
         # Use a fast, cheap model for this task
         genai.configure(api_key=gemini_api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(classification_prompt)
         response_text = response.text.strip()
 
@@ -904,4 +904,5 @@ if __name__ == '__main__':
         print("Warning: RAG system could not be initialized. Please run ingestion first.")
     
     # Run Flask app
+
     app.run(debug=True, host='0.0.0.0', port=5001)

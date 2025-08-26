@@ -1,4 +1,4 @@
- Medical RAG ChatBot 💊
+![WhatsApp Image 2025-08-26 at 15 32 52_733d5e8a](https://github.com/user-attachments/assets/32e7fb20-3e21-4311-8664-61aa07474cf9) Medical RAG ChatBot 💊
 
 A sophisticated Retrieval-Augmented Generation (RAG) system designed specifically for pharmaceutical and medical document analysis. This chatbot provides accurate, source-cited responses to drug-related queries by processing FDA drug labels and medical documents.
 
@@ -11,23 +11,6 @@ A sophisticated Retrieval-Augmented Generation (RAG) system designed specificall
 - Source Citation: Provides precise citations for all medical information
 - Real-time Processing: Fast query response with optimized vector database
 - Web Interface: Modern React-based chat interface
-
-🏗️ Architecture
-
-Medical RAG System
-├── Backend (Python/Flask)
-│ ├── PDF Processor - Extracts and structures content from medical PDFs
-│ ├── Vector Database - ChromaDB for efficient similarity search
-│ ├── Query Processor - Analyzes and responds to medical queries
-│ └── RAG Orchestrator - Coordinates the entire pipeline
-├── Frontend (React)
-│ ├── Chat Interface - Modern UI with conversation history
-│ ├── Voice Controls - Speech input/output capabilities
-│ └── Admin Features - Database management and PDF upload
-└── Data Storage
-├── ChromaDB - Vector embeddings and metadata
-└── Local Storage - Uploaded PDFs and processed documents
-
 
 🚀 Quick Start
 

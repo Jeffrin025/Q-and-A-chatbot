@@ -1,4 +1,4 @@
-![WhatsApp Image 2025-08-26 at 15 32 52_733d5e8a](https://github.com/user-attachments/assets/32e7fb20-3e21-4311-8664-61aa07474cf9) Medical RAG ChatBot 💊
+Medical RAG ChatBot 💊
 
 A sophisticated Retrieval-Augmented Generation (RAG) system designed specifically for pharmaceutical and medical document analysis. This chatbot provides accurate, source-cited responses to drug-related queries by processing FDA drug labels and medical documents.
 

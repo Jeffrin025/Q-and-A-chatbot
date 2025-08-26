@@ -349,7 +349,7 @@ CORS(app)  # Enable CORS for frontend communication
 
 # Initialize RAG system
 pdf_folder = "./pdf"
-gemini_api_key = os.getenv("GEMINI_API_KEY")
+gemini_api_key = "AIzaSyDyCos3otKK9wW60QxrFG3NgGGJGl42RM4"
 rag_system = None
 upload_handler = UploadHandler("./uploads", gemini_api_key)
 

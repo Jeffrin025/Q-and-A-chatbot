@@ -388,7 +388,7 @@ class RAGOrchestrator:
             "conversation_context": []
         }
         
-        result = self.workflow.invoke(initial_state)
+        result = self.workflow.invoke(initial_state, config={"recursion_limit": 400})
         self._ingestion_completed = True
         print(f"Processing complete. Processed {len(result['processed_pdfs'])} PDF files")
         print(f"Total documents in database: {self.vector_db.get_document_count()}")

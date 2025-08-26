@@ -24,7 +24,7 @@ import time
 from queue import Queue
 
 class PDFProcessor:
-    """Enhanced PDF processor with accurate page number extraction and performance optimizations"""
+    """Enhanced PDF processor with sequential page numbering and performance optimizations"""
     
     def __init__(self, gemini_api_key: str = None, max_workers: int = None):
         if gemini_api_key:
@@ -66,160 +66,30 @@ class PDFProcessor:
         os.makedirs(self.image_output_dir, exist_ok=True)
         
         # Cache for expensive operations
-        self._visible_page_numbers_cache = {}
         self._table_signature_cache = set()
 
-    def _extract_visible_page_numbers(self, pdf_path: str) -> Dict[int, str]:
+    def _get_page_number(self, physical_page_idx: int) -> str:
         """
-        Extract visible page numbers from PDF using enhanced OCR/text extraction
-        Returns dict mapping physical page index to visible page number
+        Get sequential page number (1-based)
         """
-        # Check cache first
-        if pdf_path in self._visible_page_numbers_cache:
-            return self._visible_page_numbers_cache[pdf_path]
-            
-        visible_page_numbers = {}
-        
-        try:
-            with pdfplumber.open(pdf_path) as pdf:
-                for physical_page_idx, page in enumerate(pdf.pages):  # Use pdf.pages directly
-                    # Extract text from multiple regions where page numbers typically appear
-                    regions = [
-                        # Top regions
-                        (0, 0, page.width, 80),  # Top 80 pixels
-                        (page.width/2 - 100, 0, page.width/2 + 100, 80),  # Top center
-                        
-                        # Bottom regions
-                        (0, page.height - 80, page.width, page.height),  # Bottom 80 pixels
-                        (page.width/2 - 100, page.height - 80, page.width/2 + 100, page.height),  # Bottom center
-                        
-                        # Side regions (for side page numbers)
-                        (0, 0, 100, page.height),  # Left side
-                        (page.width - 100, 0, page.width, page.height),  # Right side
-                        
-                        # Footer regions (common for page numbers)
-                        (0, page.height - 120, page.width, page.height - 40),
-                        (page.width/2 - 150, page.height - 120, page.width/2 + 150, page.height - 40)
-                    ]
-                    
-                    best_candidate = None
-                    best_confidence = 0
-                    
-                    for region_idx, (x0, y0, x1, y1) in enumerate(regions):
-                        try:
-                            region = page.within_bbox((x0, y0, x1, y1))
-                            text = region.extract_text() or ""
-                            
-                            if text.strip():
-                                # Enhanced page number pattern matching
-                                candidates = self._find_page_number_candidates(text)
-                                
-                                for candidate, confidence in candidates:
-                                    if confidence > best_confidence:
-                                        best_candidate = candidate
-                                        best_confidence = confidence
-                                        print(f"Page {physical_page_idx + 1}: Found candidate '{candidate}' with confidence {confidence} in region {region_idx}")
-                        
-                        except Exception as e:
-                            continue
-                    
-                    # If we found a good candidate, use it
-                    if best_candidate and best_confidence >= 0.5:
-                        visible_page_numbers[physical_page_idx] = best_candidate
-                        print(f"Page {physical_page_idx + 1}: Selected page number '{best_candidate}'")
-                    else:
-                        # Fallback: use physical page number
-                        visible_page_numbers[physical_page_idx] = str(physical_page_idx + 1)
-                        print(f"Page {physical_page_idx + 1}: Using fallback page number '{physical_page_idx + 1}'")
-            
-            print(f"Final extracted visible page numbers: {visible_page_numbers}")
-            
-        except Exception as e:
-            print(f"Error extracting visible page numbers: {e}")
-            # Fallback: create sequential page numbers
-            with pdfplumber.open(pdf_path) as pdf:
-                for physical_page_idx in range(len(pdf.pages)):
-                    visible_page_numbers[physical_page_idx] = str(physical_page_idx + 1)
-        
-        # Cache the result
-        self._visible_page_numbers_cache[pdf_path] = visible_page_numbers
-        return visible_page_numbers
-
-    def _find_page_number_candidates(self, text: str) -> List[tuple]:
-        """
-        Find potential page number candidates in text with confidence scores
-        Returns list of (candidate, confidence) tuples
-        """
-        candidates = []
-        lines = text.split('\n')
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            # Remove common non-page-number text
-            clean_line = re.sub(r'(page|pg|p|no|number|num|#|\||/)', '', line, flags=re.IGNORECASE).strip()
-            
-            # Check if it's a simple number (highest confidence)
-            if clean_line.isdigit():
-                confidence = 0.9
-                if 1 <= int(clean_line) <= 1000:  # Reasonable page number range
-                    confidence = 1.0
-                candidates.append((clean_line, confidence))
-                continue
-            
-            # Check Roman numerals
-            if self._is_roman_numeral(clean_line):
-                candidates.append((clean_line.upper(), 0.8))
-                continue
-            
-            # Check alphanumeric patterns that might be page numbers
-            if len(clean_line) <= 10 and re.match(r'^[A-Za-z0-9\-]+$', clean_line):
-                # Check if it contains digits (medium confidence)
-                if re.search(r'\d', clean_line):
-                    candidates.append((clean_line, 0.6))
-                else:
-                    # Could be section identifiers mistaken for page numbers
-                    candidates.append((clean_line, 0.3))
-        
-        # Sort by confidence (highest first)
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        return candidates
-
-    def _is_roman_numeral(self, s: str) -> bool:
-        """Check if string is a valid Roman numeral"""
-        s = s.upper().strip()
-        roman_pattern = r'^M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$'
-        return bool(re.match(roman_pattern, s))
-
-    def _get_accurate_page_number(self, physical_page_idx: int, visible_page_numbers: Dict[int, str]) -> str:
-        """
-        Get accurate page number using visible page numbers when available
-        Falls back to physical page index + 1 if no visible number found
-        """
-        if physical_page_idx in visible_page_numbers:
-            return visible_page_numbers[physical_page_idx]
-        
-        # Fallback: physical page index + 1 (1-based numbering)
         return str(physical_page_idx + 1)
 
-    def _process_element(self, element, visible_page_numbers, extracted_tables):
+    def _process_element(self, element, extracted_tables):
         """Process a single element (thread-safe)"""
         # Get physical page index from metadata
-        physical_page_idx = 0
+        physical_page_idx = 1
         if hasattr(element.metadata, 'page_number'):
             physical_page_idx = element.metadata.page_number - 1  # Convert to 0-based
         
-        # Get accurate page number
-        accurate_page_num = self._get_accurate_page_number(physical_page_idx, visible_page_numbers)
+        # Get sequential page number
+        page_num = self._get_page_number(physical_page_idx)
         
         element_data = {
             "type": type(element).__name__,
             "text": str(element),
             "metadata": element.metadata.to_dict(),
             "physical_page_index": physical_page_idx,
-            "page_number": accurate_page_num  # Use the accurate visible page number
+            "page_number": page_num  # Use sequential page number
         }
         
         # Handle tables
@@ -251,18 +121,12 @@ class PDFProcessor:
         return element_data
 
     def extract_elements(self, pdf_path: str) -> List[Dict[str, Any]]:
-        """Extract elements with accurate page numbering using parallel processing"""
+        """Extract elements with sequential page numbering using parallel processing"""
         print(f"Extracting elements from {pdf_path}...")
         start_time = time.time()
         
-        # First extract visible page numbers
-        visible_page_numbers = self._extract_visible_page_numbers(pdf_path)
-        
         processed_elements = []
         extracted_tables = set()
-        
-        # Use a thread-safe set for table signatures
-        extracted_tables_lock = threading.Lock()
         
         try:
             # Strategy 1: Use Unstructured.io for text and basic structure
@@ -286,7 +150,6 @@ class PDFProcessor:
                     self.executor.submit(
                         self._process_element, 
                         element, 
-                        visible_page_numbers, 
                         extracted_tables
                     )
                 )
@@ -299,7 +162,7 @@ class PDFProcessor:
         except Exception as e:
             print(f"Unstructured.io extraction failed: {e}")
         
-        # Strategy 2: Use pdfplumber for additional text extraction with accurate page numbers
+        # Strategy 2: Use pdfplumber for additional text extraction with sequential page numbers
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 futures = []
@@ -308,8 +171,7 @@ class PDFProcessor:
                         self.executor.submit(
                             self._extract_page_text,
                             page,
-                            physical_page_idx,
-                            visible_page_numbers
+                            physical_page_idx
                         )
                     )
                 
@@ -320,7 +182,7 @@ class PDFProcessor:
         except Exception as e:
             print(f"PDFPlumber extraction failed: {e}")
         
-        # Strategy 3: Use Camelot for table extraction with accurate page numbers
+        # Strategy 3: Use Camelot for table extraction with sequential page numbers
         try:
             print("\n=== CAMELOT TABLE EXTRACTION ATTEMPT ===")
             # Use threading for Camelot table extraction
@@ -335,7 +197,6 @@ class PDFProcessor:
                         self._process_camelot_table,
                         table,
                         i,
-                        visible_page_numbers,
                         extracted_tables
                     )
                 )
@@ -348,12 +209,11 @@ class PDFProcessor:
         except Exception as e:
             print(f"Camelot table extraction failed: {e}")
         
-        # Strategy 4: Enhanced image extraction using PyMuPDF with accurate page numbers
+        # Strategy 4: Enhanced image extraction using PyMuPDF with sequential page numbers
         try:
             image_future = self.executor.submit(
                 self._extract_images_with_pymupdf, 
-                pdf_path, 
-                visible_page_numbers
+                pdf_path
             )
             image_elements = image_future.result()
             processed_elements.extend(image_elements)
@@ -382,26 +242,26 @@ class PDFProcessor:
         
         return processed_elements
 
-    def _extract_page_text(self, page, physical_page_idx, visible_page_numbers):
+    def _extract_page_text(self, page, physical_page_idx):
         """Extract text from a single page (thread-safe)"""
         text = page.extract_text()
         if text:
-            accurate_page_num = self._get_accurate_page_number(physical_page_idx, visible_page_numbers)
+            page_num = self._get_page_number(physical_page_idx)
             return {
                 "type": "TextElement",
                 "text": text,
-                "metadata": {"page_number": accurate_page_num},
+                "metadata": {"page_number": page_num},
                 "physical_page_index": physical_page_idx,
-                "page_number": accurate_page_num
+                "page_number": page_num
             }
         return None
 
-    def _process_camelot_table(self, table, table_index, visible_page_numbers, extracted_tables):
+    def _process_camelot_table(self, table, table_index, extracted_tables):
         """Process a single Camelot table (thread-safe)"""
         if table.parsing_report and table.parsing_report.get('accuracy', 0) > 50:
             # Camelot uses 1-based physical page numbers
             physical_page_idx = table.page - 1
-            accurate_page_num = self._get_accurate_page_number(physical_page_idx, visible_page_numbers)
+            page_num = self._get_page_number(physical_page_idx)
             
             table_data = {
                 "headers": table.df.iloc[0].tolist() if not table.df.empty else [],
@@ -414,11 +274,11 @@ class PDFProcessor:
             table_element = {
                 "type": "Table",
                 "text": table.df.to_string(),
-                "metadata": {"page_number": accurate_page_num},
+                "metadata": {"page_number": page_num},
                 "physical_page_index": physical_page_idx,
-                "page_number": accurate_page_num,
+                "page_number": page_num,
                 "table_data": table_data,
-                "text_representation": self._create_table_text_representation(table_data, accurate_page_num),
+                "text_representation": self._create_table_text_representation(table_data, page_num),
                 "extraction_method": "camelot"
             }
             
@@ -426,7 +286,7 @@ class PDFProcessor:
             table_signature = self._get_table_signature(table_element)
             if table_signature not in extracted_tables:
                 extracted_tables.add(table_signature)
-                print(f"=== CAMELOT TABLE ADDED (Page {accurate_page_num}) ===\n")
+                print(f"=== CAMELOT TABLE ADDED (Page {page_num}) ===\n")
                 return table_element
             else:
                 print("=== CAMELOT TABLE SKIPPED (DUPLICATE) ===\n")
@@ -454,8 +314,8 @@ class PDFProcessor:
         self._table_signature_cache.add(signature)
         return signature
 
-    def _extract_images_with_pymupdf(self, pdf_path: str, visible_page_numbers: Dict[int, str]) -> List[Dict[str, Any]]:
-        """Extract images using PyMuPDF with accurate page numbering"""
+    def _extract_images_with_pymupdf(self, pdf_path: str) -> List[Dict[str, Any]]:
+        """Extract images using PyMuPDF with sequential page numbering"""
         image_elements = []
         doc = fitz.open(pdf_path)
         
@@ -463,7 +323,7 @@ class PDFProcessor:
             page = doc.load_page(physical_page_idx)
             image_list = page.get_images()
             
-            accurate_page_num = self._get_accurate_page_number(physical_page_idx, visible_page_numbers)
+            page_num = self._get_page_number(physical_page_idx)
             
             for img_index, img in enumerate(image_list):
                 xref = img[0]
@@ -473,7 +333,7 @@ class PDFProcessor:
                     image_ext = base_image["ext"]
                     
                     # Save image to file
-                    image_filename = f"image_page{accurate_page_num}_{img_index}.{image_ext}"
+                    image_filename = f"image_page{page_num}_{img_index}.{image_ext}"
                     image_path = os.path.join(self.image_output_dir, image_filename)
                     
                     with open(image_path, "wb") as f:
@@ -481,10 +341,10 @@ class PDFProcessor:
                     
                     image_elements.append({
                         "type": "Image",
-                        "text": f"Image on page {accurate_page_num}",
-                        "metadata": {"page_number": accurate_page_num},
+                        "text": f"Image on page {page_num}",
+                        "metadata": {"page_number": page_num},
                         "physical_page_index": physical_page_idx,
-                        "page_number": accurate_page_num,
+                        "page_number": page_num,
                         "image_path": image_path,
                         # Image captioning will be done in parallel later
                     })
@@ -757,7 +617,7 @@ class PDFProcessor:
             section_docs = future.result()
             documents_batch.extend(section_docs)
         
-        # Process tables - USING ACCURATE PAGE NUMBERS
+        # Process tables - USING SEQUENTIAL PAGE NUMBERS
         table_elements = [e for e in elements if e["type"] == "Table"]
         table_futures = []
         for table_idx, table in enumerate(table_elements):
@@ -773,7 +633,7 @@ class PDFProcessor:
             if table_doc:
                 documents_batch.append(table_doc)
         
-        # Process images - USING ACCURATE PAGE NUMBERS
+        # Process images - USING SEQUENTIAL PAGE NUMBERS
         image_elements = [e for e in elements if e["type"] == "Image" and "image_description" in e]
         image_futures = []
         for image_idx, image in enumerate(image_elements):
@@ -829,7 +689,7 @@ class PDFProcessor:
             "pdf_index": pdf_index,
             "pdf_name": pdf_name,
             "section": "TABULAR_DATA",
-            "page_number": table["page_number"],  # Accurate visible page number
+            "page_number": table["page_number"],  # Sequential page number
             "is_fda": False,
             "content_type": "tabular",
             "has_tables": True,
@@ -837,7 +697,7 @@ class PDFProcessor:
             "doc_type": "table",
             "table_id": str(uuid.uuid4()),
             "table_index": table_idx + 1,
-            "citation": f"Page {table['page_number']}, Table {table_idx + 1}",  # Accurate citation
+            "citation": f"Page {table['page_number']}, Table {table_idx + 1}",  # Sequential citation
             "table_headers": table.get("table_data", {}).get("headers", []),
             "table_row_count": table.get("table_data", {}).get("row_count", 0),
             "table_data_sample": json.dumps(table.get("table_data", {}).get("data", [])[:2]),
@@ -858,7 +718,7 @@ class PDFProcessor:
             "pdf_index": pdf_index,
             "pdf_name": pdf_name,
             "section": "VISUAL_DATA",
-            "page_number": image["page_number"],  # Accurate visible page number
+            "page_number": image["page_number"],  # Sequential page number
             "is_fda": False,
             "content_type": "visual",
             "has_tables": False,
@@ -866,7 +726,7 @@ class PDFProcessor:
             "doc_type": "image",
             "image_id": str(uuid.uuid4()),
             "image_index": image_idx + 1,
-            "citation": f"Page {image['page_number']}, Figure {image_idx + 1}",  # Accurate citation
+            "citation": f"Page {image['page_number']}, Figure {image_idx + 1}",  # Sequential citation
             "original_image_path": image.get("image_path", ""),
             "image_caption": image.get("image_description", ""),
             "pdf_identifier": f"pdf_{pdf_index}{pdf_name.replace(' ', '')}"

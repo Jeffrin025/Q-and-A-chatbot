@@ -349,7 +349,7 @@ CORS(app)  # Enable CORS for frontend communication
 
 # Initialize RAG system
 pdf_folder = "./pdf"
-gemini_api_key = "AIzaSyDyCos3otKK9wW60QxrFG3NgGGJGl42RM4"
+gemini_api_key = "your-gemini-api-key"
 rag_system = None
 upload_handler = UploadHandler("./uploads", gemini_api_key)
 
@@ -906,3 +906,4 @@ if __name__ == '__main__':
     # Run Flask app
 
     app.run(debug=True, host='0.0.0.0', port=5001)
+

@@ -88,8 +88,8 @@ app.post("/api/save-chat", async (req, res) => {
 
   try {
     const result = await pool.query(
-      "INSERT INTO chat_history (username, message, sender, timestamp) VALUES ($1, $2, $3, $4) RETURNING *",
-      [username, message, sender, timestamp]
+      "INSERT INTO chat_history (username, message, sender) VALUES ($1, $2, $3) RETURNING *",
+      [username, message, sender]
     );
     res.json({ success: true, chat: result.rows[0] });
   } catch (error) {

@@ -25,14 +25,31 @@ class QueryProcessor:
         
         # Drug-specific queries
         drug_keywords = {
-            'orencia': 'orencia', 
-            'simponi': 'simponi', 
-            'aria': 'aria',
-            'humira': 'humira', 
-            'enbrel': 'enbrel', 
-            'remicade': 'remicade', 
-            'keytruda': 'keytruda'
-        }
+    'orencia': 'orencia', 
+    'simponi': 'simponi', 
+    'aria': 'aria',
+    'humira': 'humira', 
+    'enbrel': 'enbrel', 
+    'remicade': 'remicade', 
+    'keytruda': 'keytruda',
+    'alora_pi': 'alora_pi',
+    'augtyro': 'augtyro',
+    'blujepa': 'blujepa',
+    'cinbinqo': 'cinbinqo',
+    'dalvance_pi': 'dalvance_pi',
+    'herceptin': 'herceptin',
+    'ibuprofen': 'ibuprofen',
+    'jakafi': 'jakafi',
+    'methadone': 'methadone',
+    'olumiant': 'olumiant',
+    'opzelura-prescribing-infor': 'opzelura-prescribing-infor',
+    'prilosec': 'prilosec',
+    'rinvoq_pi': 'rinvoq_pi',
+    'sotyktu': 'sotyktu',
+    'stelara': 'stelara',
+    'xeljanx': 'xeljanx'
+}
+
         
         mentioned_drugs = []
         pdf_filter = current_drug  # Start with context drug
@@ -98,7 +115,32 @@ class QueryProcessor:
         last_exchange = conversation_context[-1] if conversation_context else None
         if last_exchange and last_exchange.get('detected_drug'):
             # If previous exchange was about a drug and current query doesn't mention any specific drug
-            drug_mentioned = any(drug in query_lower for drug in ['orencia', 'simponi', 'aria', 'humira', 'enbrel', 'remicade', 'keytruda'])
+            drug_mentioned = any(drug in query_lower for drug in[
+  'orencia',
+  'simponi',
+  'aria',
+  'humira',
+  'enbrel',
+  'remicade',
+  'keytruda',
+  'alora_pi',
+  'Augtyro',
+  'BLUJEPA',
+  'Cinbinqo',
+  'dalvance_pi',
+  'Herceptin',
+  'Ibuprofen',
+  'jakafi',
+  'methadone',
+  'Olumiant',
+  'opzelura-prescribing-infor',
+  'PRILOSEC',
+  'rinvoq_pi',
+  'Sotyktu',
+  'STELARA',
+  'XELJANZ'
+]
+)
             if not drug_mentioned:
                 return True
         
@@ -182,8 +224,9 @@ Answer the user's question clearly and conversationally using ONLY the informati
 3.  *Context (If Important):* Briefly mention any critical context if it's important for understanding the answer.
 4.  *Precise Citation:* On a new line, state: "This information comes from:" followed by a CONSOLIDATED and precise list of sources.
     -   *CONSOLIDATE:* Identify the PRIMARY source where the core answer is definitively stated. Cite ONLY that primary, definitive source.
-    -   *FORMAT:* Use the format: "DocumentName, Section Name (Page X)" or "DocumentName, Table Y (Page X)".
+    -   *FORMAT:* Use the format: "DocumentName, Section Name (Page X)" or "DocumentName, (Page X)".
     -   *CRITICAL:* You MUST include the page number from the provided context for the primary source.
+    -   DO NOT mention or reference table numbers (e.g., "Table 1", "Table 2") in the response
 
 *CRITICAL RULES:*
 -   *DO NOT* use markdown, headings like "Summary:", or any special formatting in the body.

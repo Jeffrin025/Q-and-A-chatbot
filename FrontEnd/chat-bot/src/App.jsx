@@ -1,4 +1,3 @@
-// App.jsx
 import React, { useState, useEffect } from "react";
 import ChatBot from "./componenets/chatbot";
 
@@ -163,7 +162,9 @@ const App = () => {
                       {chat.sender === "user" ? "You" : "Bot"}
                     </p>
                     <p className="text-xs text-gray-400">
-                      {new Date(chat.timestamp).toLocaleTimeString()}
+                      {new Date(chat.timestamp).toLocaleString("en-IN", { 
+  timeZone: "Asia/Kolkata" 
+})}
                     </p>
                   </div>
                   <p className="text-sm text-gray-700 mt-2">{chat.message}</p>
@@ -185,8 +186,7 @@ const App = () => {
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
               </svg>
-              <span>{showHistory ? "Hide History" : "Show History"}</span>
-            </button>
+             </button>
             <span className="text-gray-700">Welcome, <span className="font-medium">{user.username}</span></span>
           </div>
           <button

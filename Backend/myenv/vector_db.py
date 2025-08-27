@@ -371,7 +371,32 @@ class EfficientVectorDB:
         
         for exchange in reversed(conversation_context):
             # Look for drug mentions
-            drug_keywords = ['orencia', 'simponi', 'aria', 'humira', 'enbrel', 'remicade', 'keytruda']
+            drug_keywords = [
+  'orencia',
+  'simponi',
+  'aria',
+  'humira',
+  'enbrel',
+  'remicade',
+  'keytruda',
+  'alora_pi',
+  'Augtyro',
+  'BLUJEPA',
+  'Cinbinqo',
+  'dalvance_pi',
+  'Herceptin',
+  'Ibuprofen',
+  'jakafi',
+  'methadone',
+  'Olumiant',
+  'opzelura-prescribing-infor',
+  'PRILOSEC',
+  'rinvoq_pi',
+  'Sotyktu',
+  'STELARA',
+  'XELJANZ'
+]
+
             for drug in drug_keywords:
                 if drug in exchange.get('user_query', '').lower() or drug in exchange.get('assistant_response', '').lower():
                     current_drug = drug

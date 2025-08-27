@@ -77,7 +77,7 @@ class PDFProcessor:
     def _process_element(self, element, extracted_tables):
         """Process a single element (thread-safe)"""
         # Get physical page index from metadata
-        physical_page_idx = 1
+        physical_page_idx = 0
         if hasattr(element.metadata, 'page_number'):
             physical_page_idx = element.metadata.page_number - 1  # Convert to 0-based
         
@@ -303,7 +303,7 @@ class PDFProcessor:
     def _get_table_signature(self, table_element: Dict[str, Any]) -> str:
         """Create a unique signature for a table to detect duplicates"""
         page_num = table_element.get("page_number", 0)
-        content_hash = hash(table_element.get("text", "")[:200])  # First 200 chars for signature
+        content_hash = hash(table_element.get("text", "")[:200])  
         signature = f"{page_num}_{content_hash}"
         
         # Check cache first

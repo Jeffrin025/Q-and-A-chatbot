@@ -494,7 +494,32 @@ def extract_drug_from_query(query: str, conversation_id: str = None) -> str:
     # If we have a current drug in conversation context, use it for follow-up questions
     if conversation and conversation["current_drug"]:
         # Check if this is a follow-up question (doesn't mention any specific drug)
-        drug_keywords = ['orencia', 'simponi', 'aria', 'humira', 'enbrel', 'remicade', 'keytruda']
+        drug_keywords = [
+  'orencia',
+  'simponi',
+  'aria',
+  'humira',
+  'enbrel',
+  'remicade',
+  'keytruda',
+  'alora_pi',
+  'Augtyro',
+  'BLUJEPA',
+  'Cinbinqo',
+  'dalvance_pi',
+  'Herceptin',
+  'Ibuprofen',
+  'jakafi',
+  'methadone',
+  'Olumiant',
+  'opzelura-prescribing-infor',
+  'PRILOSEC',
+  'rinvoq_pi',
+  'Sotyktu',
+  'STELARA',
+  'XELJANZ'
+]
+
         query_lower = query.lower()
         
         # If no specific drug is mentioned in this query, use the context drug
@@ -503,14 +528,31 @@ def extract_drug_from_query(query: str, conversation_id: str = None) -> str:
     
     # Otherwise, try to detect drug from query
     drug_keywords = {
-        'orencia': 'orencia', 
-        'simponi': 'simponi', 
-        'aria': 'aria',
-        'humira': 'humira', 
-        'enbrel': 'enbrel', 
-        'remicade': 'remicade', 
-        'keytruda': 'keytruda'
-    }
+    'orencia': 'orencia', 
+    'simponi': 'simponi', 
+    'aria': 'aria',
+    'humira': 'humira', 
+    'enbrel': 'enbrel', 
+    'remicade': 'remicade', 
+    'keytruda': 'keytruda',
+    'alora_pi': 'alora_pi',
+    'augtyro': 'augtyro',
+    'blujepa': 'blujepa',
+    'cinbinqo': 'cinbinqo',
+    'dalvance_pi': 'dalvance_pi',
+    'herceptin': 'herceptin',
+    'ibuprofen': 'ibuprofen',
+    'jakafi': 'jakafi',
+    'methadone': 'methadone',
+    'olumiant': 'olumiant',
+    'opzelura-prescribing-infor': 'opzelura-prescribing-infor',
+    'prilosec': 'prilosec',
+    'rinvoq_pi': 'rinvoq_pi',
+    'sotyktu': 'sotyktu',
+    'stelara': 'stelara',
+    'xeljanx': 'xeljanx'
+}
+
     
     query_lower = query.lower()
     for drug, filter_term in drug_keywords.items():
